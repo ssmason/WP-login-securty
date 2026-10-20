@@ -7,64 +7,78 @@
  */
 
 // STEP 1: Security check to block users from directly opening this file in a browser.
-// WHY: If an attacker triggers this file directly via a URL, executing it outside of 
-// WordPress can reveal critical path configurations, cause server errors, or expose 
+// WHY: If an attacker triggers this file directly via a URL, executing it outside of
+// WordPress can reveal critical path configurations, cause server errors, or expose
 // system behavior that aids in exploiting the environment.
 if (!defined('ABSPATH')) {
     exit;
 }
 
 /**
- * STEP 2: Override how WordPress CREATES a new password hash.
+ * STEP 2: Define the Argon2id resource constraints in ONE place.
+ * WHY: password_hash() and password_needs_rehash() must use identical options. If they
+ * differ, PHP thinks every hash is out of date and rehashes it on every single login.
+ */
+function mu_argon2id_options() {
+    return [
+        'memory_cost' => 65536, // Forces the machine to use 64 MB of RAM per attempt
+        'time_cost'   => 4,     // Forces the processor to make 4 execution passes
+        'threads'     => 2,     // Splits the work across 2 parallel processing threads
+    ];
+}
+
+/**
+ * STEP 3: Override how WordPress CREATES a new password hash.
  * This runs when users register, reset, or update their passwords.
  */
 if (!function_exists('wp_hash_password')) {
     function wp_hash_password($password) {
-        
-        // STEP 2a: Detect if the server actually supports Argon2id.
+
+        // STEP 3a: Detect if the server actually supports Argon2id.
         // If it doesn't, automatically fall back to PASSWORD_DEFAULT (Bcrypt) so logins don't break.
         $algo = defined('PASSWORD_ARGON2ID') ? PASSWORD_ARGON2ID : PASSWORD_DEFAULT;
-        
-        // STEP 2b: Configure the resource constraints if using Argon2id.
-        // This is where we demand BOTH the deliberate "timeout" and the massive "desk space" (RAM).
-        $options = [
-            'memory_cost' => 65536, // Forces the machine to use 64 MB of RAM per attempt
-            'time_cost'   => 4,     // Forces the processor to make 4 execution passes
-            'threads'     => 2,     // Splits the work across 2 parallel processing threads
-        ];
 
-        // Generate the high-security hash string
-        return password_hash($password, $algo, $options);
+        // STEP 3b: Generate the high-security hash string using the shared options from STEP 2.
+        // This is where we demand BOTH the deliberate "timeout" and the massive "desk space" (RAM).
+        return password_hash($password, $algo, mu_argon2id_options());
     }
 }
 
 /**
- * STEP 3: Override how WordPress CHECKS an entered password at login.
+ * STEP 4: Override how WordPress CHECKS an entered password.
  * This acts as a bridge to seamlessly handle old MD5 users and new Argon2id users.
  */
 if (!function_exists('wp_check_password')) {
     function wp_check_password($password, $hash, $user_id = '') {
-        
-        // STEP 3a: Check if the stored database hash is already a modern PHP native hash (Argon2id or Bcrypt)
-        if (password_get_info($hash)['algo'] !== 0) {
-            
+
+        // STEP 4a: Only allow a hash upgrade when the hash being checked is the user's MAIN login password.
+        // WHY: WordPress also calls this function to check Application Passwords. Without this check,
+        // a valid app password would be saved over the user's real login password.
+        $user              = $user_id ? get_userdata($user_id) : false;
+        $is_login_password = $user && hash_equals($user->user_pass, $hash);
+
+        // STEP 4b: Check if the stored database hash is already a modern PHP native hash (Argon2id or Bcrypt).
+        // WHY null: Since PHP 7.4, password_get_info() returns null (not 0) for hashes it doesn't recognise.
+        if (null !== password_get_info($hash)['algo']) {
+
             // Verify the entered password against the modern algorithm requirements
             $is_valid = password_verify($password, $hash);
-            
+
             // Target Algorithm: We prefer Argon2id if available, otherwise Bcrypt
             $preferred_algo = defined('PASSWORD_ARGON2ID') ? PASSWORD_ARGON2ID : PASSWORD_DEFAULT;
-            
-            // If the password matches but your server's security settings or RAM limits changed, 
+
+            // If the password matches but your server's security settings or RAM limits changed,
             // recalculate and upgrade the hash seamlessly without bothering the user.
-            if ($is_valid && password_needs_rehash($hash, $preferred_algo)) {
+            // The same options from STEP 2 are passed so unchanged hashes are left alone.
+            if ($is_valid && $is_login_password && password_needs_rehash($hash, $preferred_algo, mu_argon2id_options())) {
                 wp_set_password($password, $user_id);
             }
-            
+
             // Return the true/false result through standard WordPress security filters
             return apply_filters('check_password', $is_valid, $password, $hash, $user_id);
         }
 
-        // STEP 3b: Fallback mode if the stored database hash is still an old MD5/phpass string
+        // STEP 4c: Fallback mode if the stored database hash is still an old MD5/phpass string
         global $wp_hasher;
 
         // Fire up the legacy WordPress core hashing class to read the old format
@@ -76,9 +90,9 @@ if (!function_exists('wp_check_password')) {
         // Check the typed password against the old MD5 format
         $is_valid = $wp_hasher->CheckPassword($password, $hash);
 
-        // MIGRATION STEP: If the legacy password is correct, immediately overwrite the 
+        // MIGRATION STEP: If the legacy login password is correct, immediately overwrite the
         // old MD5 in the database with a fresh, secure Argon2id hash on the fly.
-        if ($is_valid && !empty($user_id)) {
+        if ($is_valid && $is_login_password) {
             wp_set_password($password, $user_id);
         }
 

@@ -7,8 +7,8 @@
  */
 
 // STEP 1: Security check to block users from directly opening this file in a browser.
-// WHY: If an attacker triggers this file directly via a URL, executing it outside of 
-// WordPress can reveal critical path configurations, cause server errors, or expose 
+// WHY: If an attacker triggers this file directly via a URL, executing it outside of
+// WordPress can reveal critical path configurations, cause server errors, or expose
 // system behavior that aids in exploiting the environment.
 if (!defined('ABSPATH')) {
     exit;
@@ -27,29 +27,36 @@ if (!function_exists('wp_hash_password')) {
 }
 
 /**
- * STEP 3: Override how WordPress CHECKS an entered password at login.
+ * STEP 3: Override how WordPress CHECKS an entered password.
  * This acts as a bridge to seamlessly handle both old MD5 users and new Bcrypt users.
  */
 if (!function_exists('wp_check_password')) {
     function wp_check_password($password, $hash, $user_id = '') {
-        
-        // STEP 3a: Check if the stored database hash is already a modern bcrypt hash
-        if (password_get_info($hash)['algo'] !== 0) {
-            
+
+        // STEP 3a: Only allow a hash upgrade when the hash being checked is the user's MAIN login password.
+        // WHY: WordPress also calls this function to check Application Passwords. Without this check,
+        // a valid app password would be saved over the user's real login password.
+        $user              = $user_id ? get_userdata($user_id) : false;
+        $is_login_password = $user && hash_equals($user->user_pass, $hash);
+
+        // STEP 3b: Check if the stored database hash is already a modern bcrypt hash.
+        // WHY null: Since PHP 7.4, password_get_info() returns null (not 0) for hashes it doesn't recognise.
+        if (null !== password_get_info($hash)['algo']) {
+
             // Verify the entered password against the modern bcrypt hash
             $is_valid = password_verify($password, $hash);
-            
-            // If the password matches but your server's security settings upgraded, 
+
+            // If the password matches but your server's security settings upgraded,
             // recalculate the hash seamlessly without bothering the user.
-            if ($is_valid && password_needs_rehash($hash, PASSWORD_DEFAULT)) {
+            if ($is_valid && $is_login_password && password_needs_rehash($hash, PASSWORD_DEFAULT)) {
                 wp_set_password($password, $user_id);
             }
-            
+
             // Return the true/false result through standard WordPress security filters
             return apply_filters('check_password', $is_valid, $password, $hash, $user_id);
         }
 
-        // STEP 3b: Fallback mode if the stored database hash is still an old MD5/phpass string
+        // STEP 3c: Fallback mode if the stored database hash is still an old MD5/phpass string
         global $wp_hasher;
 
         // Fire up the legacy WordPress core hashing class to read the old format
@@ -61,9 +68,9 @@ if (!function_exists('wp_check_password')) {
         // Check the typed password against the old MD5 format
         $is_valid = $wp_hasher->CheckPassword($password, $hash);
 
-        // MIGRATION STEP: If the legacy password is correct, immediately overwrite the 
+        // MIGRATION STEP: If the legacy login password is correct, immediately overwrite the
         // old MD5 in the database with a fresh, secure Bcrypt hash on the fly.
-        if ($is_valid && !empty($user_id)) {
+        if ($is_valid && $is_login_password) {
             wp_set_password($password, $user_id);
         }
 
