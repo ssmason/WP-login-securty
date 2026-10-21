@@ -30,6 +30,51 @@ Drop-in WordPress mu-plugins that replace legacy MD5/phpass password hashes with
 1. Copy **either** `Bcrypt.php` **or** `Argon2id.php` to `/wp-content/mu-plugins/`.
 2. Nothing to activate. mu-plugins load automatically.
 
+## Tests
+
+### Setup
+
+```bash
+composer install
+```
+
+### Run
+
+```bash
+composer test            # both plugins
+composer test:bcrypt     # Bcrypt.php only
+composer test:argon2id   # Argon2id.php only
+```
+
+Each test prints its steps as it runs.
+
+### What's tested
+
+**Both plugins**
+
+- Opening the file directly is blocked
+- New hashes are native, verify, and are uniquely salted
+- Current native hash + correct password: accepted, not rehashed
+- Native hash + wrong password: rejected, not rehashed
+- Outdated native hash: upgraded on login
+- Legacy phpass hash: accepted and migrated
+- Legacy hash + wrong password: rejected, not migrated
+- Application Passwords (legacy or native) never overwrite the login password
+- No user ID: no lookup, no rehash
+- Result passes through the `check_password` filter
+
+**Bcrypt.php**
+
+- Hashes are bcrypt and match `PASSWORD_DEFAULT`
+
+**Argon2id.php**
+
+- `mu_argon2id_options()` returns 64 MB / 4 passes / 2 threads
+- Hashes are Argon2id with those options
+- Current Argon2id hash is not rehashed on every login
+- Argon2id hash with old settings is upgraded
+- Bcrypt hash is upgraded to Argon2id
+
 ## Requirements
 
 - PHP 7.4+ (Argon2id needs PHP compiled with Argon2 support)
