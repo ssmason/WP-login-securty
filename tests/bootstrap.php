@@ -29,7 +29,7 @@ if ( false === $mu_plugin || ! in_array( $mu_plugin, array( 'Bcrypt', 'Argon2id'
 	exit( 1 );
 }
 
-define( 'MU_PLUGIN_FILE', dirname( __DIR__ ) . '/' . $mu_plugin . '.php' );
+define( 'MU_PLUGIN_FILE', dirname( __DIR__ ) . '/mu-plugins/' . $mu_plugin . '.php' );
 
 require_once MU_PLUGIN_FILE;
 require_once __DIR__ . '/PluginTestCase.php';

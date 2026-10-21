@@ -27,7 +27,7 @@ Drop-in WordPress mu-plugins that replace legacy MD5/phpass password hashes with
 
 ## Installation
 
-1. Copy **either** `Bcrypt.php` **or** `Argon2id.php` to `/wp-content/mu-plugins/`.
+1. Copy **either** `mu-plugins/Bcrypt.php` **or** `mu-plugins/Argon2id.php` to `/wp-content/mu-plugins/`.
 2. Nothing to activate. mu-plugins load automatically.
 
 ## Tests
