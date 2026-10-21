@@ -1,0 +1,22 @@
+{
+    "name": "wp/login-security",
+    "type": "project",
+    "require-dev": {
+        "phpunit/phpunit": "^11",
+        "brain/monkey": "^2.6"
+    },
+    "scripts": {
+        "test": [
+            "@test:bcrypt",
+            "@test:argon2id"
+        ],
+        "test:bcrypt": [
+            "@putenv MU_PLUGIN=Bcrypt",
+            "phpunit --testsuite bcrypt --no-progress"
+        ],
+        "test:argon2id": [
+            "@putenv MU_PLUGIN=Argon2id",
+            "phpunit --testsuite argon2id --no-progress"
+        ]
+    }
+}
